@@ -1,0 +1,21 @@
+{
+  "name": "Goodnotes",
+  "short_name": "Goodnotes",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#e5e5ea",
+  "theme_color": "#007aff",
+  "description": "Digital notebook application with vector ink, paper templates, and Apple Pencil support.",
+  "icons": [
+    {
+      "src": "assets/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "assets/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
