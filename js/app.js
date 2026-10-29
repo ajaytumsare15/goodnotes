@@ -203,8 +203,12 @@ class GoodnotesApp {
 
   /* ----------------- UI BINDINGS ----------------- */
   bindUIEvents() {
-    // Sync strokes change
-    this.ink.onChange = () => this.saveCurrentPage();
+    // Debounce save to reduce IndexedDB writes
+    let saveTimeout = null;
+    this.ink.onChange = () => {
+      if (saveTimeout) clearTimeout(saveTimeout);
+      saveTimeout = setTimeout(() => this.saveCurrentPage(), 300);
+    };
 
     // Lasso selection change
     const lassoBox = document.getElementById('lasso-box');

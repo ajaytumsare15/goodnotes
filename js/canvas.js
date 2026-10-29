@@ -70,7 +70,12 @@ export class InkCanvas {
     this.canvas.addEventListener('pointerdown', (e) => this.handlePointerDown(e));
     window.addEventListener('pointermove', (e) => this.handlePointerMove(e));
     window.addEventListener('pointerup', (e) => this.handlePointerUp(e));
+    window.addEventListener('pointercancel', (e) => this.handlePointerUp(e));
     this.canvas.addEventListener('wheel', (e) => this.handleWheel(e), { passive: false });
+
+    // Throttle redraw requests
+    this.pendingRedraw = false;
+    this.rafId = null;
   }
 
   getCanvasPoint(e) {
@@ -135,6 +140,12 @@ export class InkCanvas {
   }
 
   handlePointerMove(e) {
+    // Throttle move events
+    if (!this.lastMoveTime) this.lastMoveTime = 0;
+    const now = performance.now();
+    if (now - this.lastMoveTime < 8) return; // ~120fps max
+    this.lastMoveTime = now;
+
     if (this.isPanning && this.lastPanPoint) {
       const dx = e.clientX - this.lastPanPoint.x;
       const dy = e.clientY - this.lastPanPoint.y;
@@ -183,8 +194,8 @@ export class InkCanvas {
       const prevPt = pts[pts.length - 1];
       const dist = Math.hypot(pt.x - prevPt.x, pt.y - prevPt.y);
 
-      // Interpolate points smoothly
-      if (dist >= 1.5) {
+      // Interpolate points smoothly - reduce threshold for smoother lines
+      if (dist >= 0.8) {
         pts.push(pt);
         this.redraw();
       }
@@ -260,24 +271,35 @@ export class InkCanvas {
     const eraserRadius = 14;
     let erasedAny = false;
 
-    this.strokes = this.strokes.filter(stroke => {
+    // Use traditional loop instead of filter for better performance
+    const remainingStrokes = [];
+    for (let i = 0; i < this.strokes.length; i++) {
+      const stroke = this.strokes[i];
+
       if (this.eraseHighlighterOnly && stroke.tool !== 'highlighter') {
-        return true;
+        remainingStrokes.push(stroke);
+        continue;
       }
 
       // Check distance from eraser point to stroke polyline
+      let shouldErase = false;
       const pts = stroke.points;
-      for (let i = 0; i < pts.length - 1; i++) {
-        const d = this.distToSegment(pt, pts[i], pts[i + 1]);
+      for (let j = 0; j < pts.length - 1; j++) {
+        const d = this.distToSegment(pt, pts[j], pts[j + 1]);
         if (d <= eraserRadius) {
+          shouldErase = true;
           erasedAny = true;
-          return false; // Remove stroke
+          break;
         }
       }
-      return true;
-    });
+
+      if (!shouldErase) {
+        remainingStrokes.push(stroke);
+      }
+    }
 
     if (erasedAny) {
+      this.strokes = remainingStrokes;
       this.redraw();
       this.onChange();
     }
@@ -466,6 +488,19 @@ export class InkCanvas {
 
   /* ----------------- SMOOTH VECTOR INK RENDERING ----------------- */
   redraw() {
+    // Throttle redraws using requestAnimationFrame
+    if (this.pendingRedraw) return;
+    this.pendingRedraw = true;
+
+    if (this.rafId) cancelAnimationFrame(this.rafId);
+
+    this.rafId = requestAnimationFrame(() => {
+      this.pendingRedraw = false;
+      this._performRedraw();
+    });
+  }
+
+  _performRedraw() {
     this.ctx.clearRect(0, 0, this.width, this.height);
 
     // 1. Draw Highlighters first (so they sit underneath pen ink cleanly)
@@ -492,6 +527,15 @@ export class InkCanvas {
   }
 
   renderStroke(stroke) {
+    // Skip rendering if stroke is off-screen (rough culling)
+    if (this.zoom < 1 && stroke.points.length > 0) {
+      const bounds = this.getStrokeBounds(stroke);
+      if (bounds.maxX < 0 || bounds.minX > this.width ||
+          bounds.maxY < 0 || bounds.minY > this.height) {
+        return; // Off-screen, skip
+      }
+    }
+
     this.ctx.save();
     this.ctx.strokeStyle = stroke.color;
     this.ctx.fillStyle = stroke.color;
@@ -529,23 +573,88 @@ export class InkCanvas {
       return;
     }
 
-    // Smooth Bezier Spline
-    this.ctx.beginPath();
-    this.ctx.moveTo(pts[0].x, pts[0].y);
+    // Smooth Bezier Spline with path simplification for long strokes
+    const simplifiedPts = pts.length > 100 ? this.simplifyPath(pts, 0.5) : pts;
 
-    for (let i = 1; i < pts.length - 1; i++) {
-      const midX = (pts[i].x + pts[i + 1].x) / 2;
-      const midY = (pts[i].y + pts[i + 1].y) / 2;
-      this.ctx.quadraticCurveTo(pts[i].x, pts[i].y, midX, midY);
+    this.ctx.beginPath();
+    this.ctx.moveTo(simplifiedPts[0].x, simplifiedPts[0].y);
+
+    for (let i = 1; i < simplifiedPts.length - 1; i++) {
+      const midX = (simplifiedPts[i].x + simplifiedPts[i + 1].x) / 2;
+      const midY = (simplifiedPts[i].y + simplifiedPts[i + 1].y) / 2;
+      this.ctx.quadraticCurveTo(simplifiedPts[i].x, simplifiedPts[i].y, midX, midY);
     }
 
-    if (pts.length > 1) {
-      const last = pts[pts.length - 1];
+    if (simplifiedPts.length > 1) {
+      const last = simplifiedPts[simplifiedPts.length - 1];
       this.ctx.lineTo(last.x, last.y);
     }
 
     this.ctx.stroke();
     this.ctx.restore();
+  }
+
+  getStrokeBounds(stroke) {
+    const pts = stroke.points;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (let i = 0; i < pts.length; i++) {
+      if (pts[i].x < minX) minX = pts[i].x;
+      if (pts[i].y < minY) minY = pts[i].y;
+      if (pts[i].x > maxX) maxX = pts[i].x;
+      if (pts[i].y > maxY) maxY = pts[i].y;
+    }
+    return { minX, minY, maxX, maxY };
+  }
+
+  simplifyPath(points, tolerance) {
+    // Douglas-Peucker algorithm for path simplification
+    if (points.length < 3) return points;
+
+    const sqTolerance = tolerance * tolerance;
+    let simplified = [points[0]];
+
+    const simplifyDPStep = (points, first, last, sqTolerance, simplified) => {
+      let maxSqDist = sqTolerance;
+      let index = 0;
+
+      for (let i = first + 1; i < last; i++) {
+        const sqDist = this.getSqSegDist(points[i], points[first], points[last]);
+        if (sqDist > maxSqDist) {
+          index = i;
+          maxSqDist = sqDist;
+        }
+      }
+
+      if (maxSqDist > sqTolerance) {
+        if (index - first > 1) simplifyDPStep(points, first, index, sqTolerance, simplified);
+        simplified.push(points[index]);
+        if (last - index > 1) simplifyDPStep(points, index, last, sqTolerance, simplified);
+      }
+    };
+
+    simplifyDPStep(points, 0, points.length - 1, sqTolerance, simplified);
+    simplified.push(points[points.length - 1]);
+
+    return simplified;
+  }
+
+  getSqSegDist(p, p1, p2) {
+    let x = p1.x, y = p1.y, dx = p2.x - x, dy = p2.y - y;
+
+    if (dx !== 0 || dy !== 0) {
+      const t = ((p.x - x) * dx + (p.y - y) * dy) / (dx * dx + dy * dy);
+      if (t > 1) {
+        x = p2.x;
+        y = p2.y;
+      } else if (t > 0) {
+        x += dx * t;
+        y += dy * t;
+      }
+    }
+
+    dx = p.x - x;
+    dy = p.y - y;
+    return dx * dx + dy * dy;
   }
 
   drawStrokeSegment(stroke, p1, p2) {
