@@ -41,6 +41,13 @@ class GoodnotesApp {
     this.bindKeyboardShortcuts();
     this.renderTemplatePickerOptions();
     this.updateZoomLabel();
+
+    // Initialize default tool (pen) as active
+    const penButton = document.getElementById('tool-pen');
+    if (penButton) {
+      penButton.classList.add('active');
+      this.tools.setTool('pen');
+    }
   }
 
   /* ----------------- NOTEBOOK & PAGE MANAGEMENT ----------------- */

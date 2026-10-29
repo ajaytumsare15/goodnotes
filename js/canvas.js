@@ -68,10 +68,13 @@ export class InkCanvas {
 
   bindEvents() {
     this.canvas.addEventListener('pointerdown', (e) => this.handlePointerDown(e));
-    window.addEventListener('pointermove', (e) => this.handlePointerMove(e));
+    window.addEventListener('pointermove', (e) => this.handlePointerMove(e), { passive: false });
     window.addEventListener('pointerup', (e) => this.handlePointerUp(e));
     window.addEventListener('pointercancel', (e) => this.handlePointerUp(e));
     this.canvas.addEventListener('wheel', (e) => this.handleWheel(e), { passive: false });
+
+    // Prevent context menu on canvas
+    this.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
     // Throttle redraw requests
     this.pendingRedraw = false;
@@ -87,6 +90,9 @@ export class InkCanvas {
   }
 
   handlePointerDown(e) {
+    // Prevent default touch/pen behavior
+    e.preventDefault();
+
     // Apple Pencil Palm Rejection: if an Apple Pencil stroke is active, reject finger touches
     if (this.activePointerId !== null && e.pointerId !== this.activePointerId) {
       if (e.pointerType === 'touch') return;
@@ -140,11 +146,16 @@ export class InkCanvas {
   }
 
   handlePointerMove(e) {
-    // Throttle move events
+    // Reduce throttle for smoother drawing
     if (!this.lastMoveTime) this.lastMoveTime = 0;
     const now = performance.now();
-    if (now - this.lastMoveTime < 8) return; // ~120fps max
+    if (now - this.lastMoveTime < 4) return; // Reduced to 4ms for smoother feel
     this.lastMoveTime = now;
+
+    // Prevent default to stop scrolling/selecting
+    if (this.isPanning || this.activeStroke || this.isLassoSelecting || this.isDraggingSelection) {
+      e.preventDefault();
+    }
 
     if (this.isPanning && this.lastPanPoint) {
       const dx = e.clientX - this.lastPanPoint.x;
