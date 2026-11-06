@@ -514,22 +514,42 @@ export class InkCanvas {
   _performRedraw() {
     this.ctx.clearRect(0, 0, this.width, this.height);
 
-    // 1. Draw Highlighters first (so they sit underneath pen ink cleanly)
-    this.ctx.save();
-    this.ctx.globalCompositeOperation = 'multiply';
-    this.strokes.filter(s => s.tool === 'highlighter').forEach(s => this.renderStroke(s));
-    if (this.activeStroke && this.activeStroke.tool === 'highlighter') {
-      this.renderStroke(this.activeStroke);
+    // Batch highlighters and regular strokes in single passes to avoid multiple array allocations and filters
+    const highlighters = [];
+    const regularStrokes = [];
+
+    for (let i = 0; i < this.strokes.length; i++) {
+      if (this.strokes[i].tool === 'highlighter') {
+        highlighters.push(this.strokes[i]);
+      } else {
+        regularStrokes.push(this.strokes[i]);
+      }
     }
-    this.ctx.restore();
+
+    // 1. Draw Highlighters first
+    if (highlighters.length > 0 || (this.activeStroke && this.activeStroke.tool === 'highlighter')) {
+      this.ctx.save();
+      this.ctx.globalCompositeOperation = 'multiply';
+      for (let i = 0; i < highlighters.length; i++) {
+        this.renderStroke(highlighters[i]);
+      }
+      if (this.activeStroke && this.activeStroke.tool === 'highlighter') {
+        this.renderStroke(this.activeStroke);
+      }
+      this.ctx.restore();
+    }
 
     // 2. Draw Regular Ink & Shapes
-    this.ctx.save();
-    this.strokes.filter(s => s.tool !== 'highlighter').forEach(s => this.renderStroke(s));
-    if (this.activeStroke && this.activeStroke.tool !== 'highlighter') {
-      this.renderStroke(this.activeStroke);
+    if (regularStrokes.length > 0 || (this.activeStroke && this.activeStroke.tool !== 'highlighter')) {
+      this.ctx.save();
+      for (let i = 0; i < regularStrokes.length; i++) {
+        this.renderStroke(regularStrokes[i]);
+      }
+      if (this.activeStroke && this.activeStroke.tool !== 'highlighter') {
+        this.renderStroke(this.activeStroke);
+      }
+      this.ctx.restore();
     }
-    this.ctx.restore();
 
     // 3. Highlight Selected strokes
     if (this.selectedStrokeIds.size > 0) {
