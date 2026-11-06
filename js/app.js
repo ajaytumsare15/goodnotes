@@ -3,7 +3,7 @@
  */
 import { storage } from './storage.js';
 import { PaperRenderer } from './paper.js';
-import { InkCanvas } from './canvas.js';
+import { InkCanvas } from './canvas-v2.js';
 import { ToolManager } from './tools.js';
 import { NotebookExporter } from './export.js';
 

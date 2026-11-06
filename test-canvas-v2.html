@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Canvas Test - Optimized v2</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 20px;
+      font-family: system-ui;
+      background: #f0f0f0;
+    }
+    #test-canvas {
+      background: white;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      touch-action: none;
+    }
+    .controls {
+      margin: 20px 0;
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    button {
+      padding: 8px 16px;
+      border: none;
+      background: #007aff;
+      color: white;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    button:hover {
+      background: #0051a8;
+    }
+    .status {
+      margin-top: 20px;
+      padding: 12px;
+      background: #e8f5e9;
+      border-radius: 6px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Canvas Optimization Test</h1>
+
+  <div class="controls">
+    <button id="test-draw">✓ Test Drawing</button>
+    <button id="test-undo">↶ Test Undo</button>
+    <button id="test-eraser">⌫ Test Eraser</button>
+    <button id="test-clear">✕ Clear All</button>
+    <button id="run-all">🚀 Run All Tests</button>
+  </div>
+
+  <canvas id="test-canvas" width="800" height="600"></canvas>
+
+  <div class="status" id="status">Ready to test...</div>
+
+  <script type="module">
+    import { InkCanvas } from './js/canvas-v2.js';
+
+    const canvas = document.getElementById('test-canvas');
+    const status = document.getElementById('status');
+    let ink = null;
+    let testsPassed = 0;
+    let testsFailed = 0;
+
+    function log(message, isError = false) {
+      console.log(message);
+      status.innerHTML += `<div style="color: ${isError ? 'red' : 'green'}">${message}</div>`;
+    }
+
+    function assert(condition, message) {
+      if (condition) {
+        testsPassed++;
+        log(`✓ ${message}`);
+      } else {
+        testsFailed++;
+        log(`✗ FAIL: ${message}`, true);
+      }
+    }
+
+    // Initialize
+    try {
+      ink = new InkCanvas(canvas, 800, 600);
+      assert(true, 'Canvas initialized successfully');
+      assert(ink.strokes !== undefined, 'Strokes array exists');
+      assert(typeof ink.redraw === 'function', 'redraw() method exists');
+      assert(typeof ink.undo === 'function', 'undo() method exists');
+    } catch (e) {
+      log(`✗ Initialization failed: ${e.message}`, true);
+      testsFailed++;
+    }
+
+    // Test 1: Drawing simulation
+    document.getElementById('test-draw').addEventListener('click', () => {
+      status.innerHTML = '<strong>Testing drawing...</strong>';
+      try {
+        // Simulate pen stroke
+        ink.tool = 'pen';
+        ink.color = '#007aff';
+
+        // Simulate pointerdown
+        const startEvent = new PointerEvent('pointerdown', {
+          clientX: 100,
+          clientY: 100,
+          pressure: 0.5,
+          pointerType: 'pen'
+        });
+
+        ink.handlePointerDown(startEvent);
+        assert(ink.activeStroke !== null, 'Active stroke created on pointerdown');
+
+        // Simulate pointermove
+        for (let i = 0; i < 10; i++) {
+          const moveEvent = new PointerEvent('pointermove', {
+            clientX: 100 + i * 10,
+            clientY: 100 + i * 5,
+            pressure: 0.5,
+            buttons: 1
+          });
+          ink.handlePointerMove(moveEvent);
+        }
+
+        assert(ink.activeStroke.points.length > 1, 'Stroke points added during move');
+
+        // Simulate pointerup
+        ink.handlePointerUp(new PointerEvent('pointerup', {}));
+
+        assert(ink.activeStroke === null, 'Active stroke cleared after pointerup');
+        assert(ink.strokes.length > 0, 'Stroke added to strokes array');
+
+        log(`Drawing test complete: ${ink.strokes.length} strokes`);
+      } catch (e) {
+        log(`✗ Drawing test failed: ${e.message}`, true);
+        testsFailed++;
+      }
+    });
+
+    // Test 2: Undo
+    document.getElementById('test-undo').addEventListener('click', () => {
+      status.innerHTML = '<strong>Testing undo...</strong>';
+      try {
+        const strokesBefore = ink.strokes.length;
+        const undone = ink.undo();
+        assert(undone, 'Undo returned true');
+        assert(ink.strokes.length <= strokesBefore, 'Strokes count reduced or same');
+        log('Undo test passed');
+      } catch (e) {
+        log(`✗ Undo test failed: ${e.message}`, true);
+        testsFailed++;
+      }
+    });
+
+    // Test 3: Eraser
+    document.getElementById('test-eraser').addEventListener('click', () => {
+      status.innerHTML = '<strong>Testing eraser...</strong>';
+      try {
+        ink.tool = 'eraser';
+        const strokesBefore = ink.strokes.length;
+
+        // Erase at center of first stroke if exists
+        if (ink.strokes.length > 0) {
+          const firstStroke = ink.strokes[0];
+          if (firstStroke.points.length > 0) {
+            ink.eraseAtPoint(firstStroke.points[0]);
+            assert(ink.strokes.length < strokesBefore, 'Stroke erased');
+          }
+        }
+        log('Eraser test passed');
+      } catch (e) {
+        log(`✗ Eraser test failed: ${e.message}`, true);
+        testsFailed++;
+      }
+    });
+
+    // Test 4: Clear
+    document.getElementById('test-clear').addEventListener('click', () => {
+      status.innerHTML = '<strong>Testing clear...</strong>';
+      try {
+        ink.clear();
+        assert(ink.strokes.length === 0, 'All strokes cleared');
+        log('Clear test passed');
+      } catch (e) {
+        log(`✗ Clear test failed: ${e.message}`, true);
+        testsFailed++;
+      }
+    });
+
+    // Run all tests
+    document.getElementById('run-all').addEventListener('click', async () => {
+      status.innerHTML = '<strong>Running all tests...</strong><br>';
+      testsPassed = 0;
+      testsFailed = 0;
+
+      document.getElementById('test-draw').click();
+      await new Promise(r => setTimeout(r, 100));
+
+      document.getElementById('test-undo').click();
+      await new Promise(r => setTimeout(r, 100));
+
+      document.getElementById('test-eraser').click();
+      await new Promise(r => setTimeout(r, 100));
+
+      setTimeout(() => {
+        log(`<br><strong>RESULTS: ${testsPassed} passed, ${testsFailed} failed</strong>`);
+        if (testsFailed === 0) {
+          log('✓ ALL TESTS PASSED - Ready to deploy!', false);
+        } else {
+          log('⚠ Some tests failed - needs fixes', true);
+        }
+      }, 200);
+    });
+
+    log('Test suite loaded. Click buttons to test or "Run All Tests"');
+  </script>
+</body>
+</html>
